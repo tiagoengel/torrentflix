@@ -38,8 +38,12 @@ TorrentFlix.prototype.play = function(torrent, opts) {
 		largerFile.select();
 		pump(largerFile.createReadStream(), fs.createWriteStream(destFile));
 
-		interval = setInterval(openPlayer, 500);
-		openPlayer(destFile, opts, interval);
+		
+		if (opts.vlc) {			
+			interval = setInterval(function() { openPlayer(destFile, interval); }, 500);
+			openPlayer(destFile, interval);		
+		}
+		
 
 		function showInfo() {
 			var unchoked = engine.swarm.wires.filter(active);
@@ -72,8 +76,8 @@ TorrentFlix.prototype.play = function(torrent, opts) {
 			clivas.flush();
 		}
 
-		setInterval(showInfo, 500);
-		showInfo();
+		// setInterval(showInfo, 500);
+		// showInfo();
 	});
 
 }
@@ -86,18 +90,20 @@ function bytes(num) {
 	return numeral(num).format('0.0b');
 }
 
-function openPlayer(fileName, opts, intervalId) {
-	minSize = 10 * 1024 * 1024; //10MB
-	if (opts.vlc) {
-		fs.stat(fileName, function(err, stat) {
-			if (err) return;
-			
-			if (stat.size >= minSize) {
-				clearInterval(intervalId);
-				proc.exec('vlc '+fileName);
-			}			
-		});
-	}
+function openPlayer(fileName, intervalId) {
+	minSize = 10 * 1024 * 1024; //10MB	
+	console.log(fileName);
+	fs.stat(fileName, function(err, stat) {
+		if (err) return;
+
+
+
+		if (stat.size >= minSize) {
+			clearInterval(intervalId);
+			proc.exec('vlc '+fileName);
+		}			
+	});
+	
 }
 
 module.exports = TorrentFlix;
