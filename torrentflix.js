@@ -1,11 +1,14 @@
 var torrentstream = require('torrent-stream');
-var proc = require('child_process');
-var clivas = require('clivas');
-var numeral = require('numeral');
 var fs = require('fs');
 var pump = require('pump');
+var util = require('util');
+var events = require('events');
 
-var TorrentFlix = function() {}
+var TorrentFlix = function() {
+	events.EventEmitter.call(this);
+}
+
+util.inherits(TorrentFlix, events.EventEmitter);
 
 TorrentFlix.prototype.play = function(torrent, opts) {
 
@@ -14,7 +17,8 @@ TorrentFlix.prototype.play = function(torrent, opts) {
 	var wires = engine.swarm.wires;
 	var swarm = engine.swarm;
 	var hotswaps = 0;
-
+	var self = this;	
+	
 	engine.on('uninterested', function() {
 		engine.swarm.pause();
 	});
@@ -27,83 +31,49 @@ TorrentFlix.prototype.play = function(torrent, opts) {
 		hotswaps++;
 	});
 
-	engine.on('ready', function () {
+	engine.on('ready', onReady);	
 
+	function onReady() {
 		var largerFile = engine.files.reduce(function(a, b) {
 			return a.length > b.length ? a : b;
 		});
 
-		var destFile = opts.folder + '/' + largerFile.name;
+		var destFile = opts.folder + '/' + largerFile.name;		
+		var start = 0;
+		var flags = {};
+		if (fs.existsSync(destFile)) {			
+			start = fs.statSync(destFile)["size"];
+			flags = {'flags' : 'a'};//append			
+		}
 
 		largerFile.select();
-		pump(largerFile.createReadStream(), fs.createWriteStream(destFile));
+		pump(largerFile.createReadStream({start: start}), fs.createWriteStream(destFile, flags));
+		self.emit("downloadStart", destFile);
 
-		
-		if (opts.vlc) {			
-			interval = setInterval(function() { openPlayer(destFile, interval); }, 500);
-			openPlayer(destFile, interval);		
-		}
-		
 
-		function showInfo() {
-			var unchoked = engine.swarm.wires.filter(active);
-			var runtime = Math.floor((Date.now() - started) / 1000);
-			var linesremaining = clivas.height;
-			var peerslisted = 0;
-
-			clivas.clear();
-			clivas.line('{yellow:info} {green:streaming} {bold:'+largerFile.name+'} {green:-} {bold:'+bytes(swarm.downloadSpeed())+'/s} {green:from} {bold:'+unchoked.length +'/'+wires.length+'} {green:peers}    ');
-			clivas.line('{yellow:info} {green:downloaded} {bold:'+bytes(swarm.downloaded)+'} {green:and uploaded }{bold:'+bytes(swarm.uploaded)+'} {green:in }{bold:'+runtime+'s} {green:with} {bold:'+hotswaps+'} {green:hotswaps}     ');
-			clivas.line('{yellow:info} {green:peer queue size is} {bold:'+swarm.queued+'}     ');
-			clivas.line('{80:}');
-			linesremaining -= 8;
-
-			wires.every(function(wire) {
-				var tags = [];
-				if (wire.peerChoking) tags.push('choked');
-				clivas.line('{25+magenta:'+wire.peerAddress+'} {10:'+bytes(wire.downloaded)+'} {10+cyan:'+bytes(wire.downloadSpeed())+'/s} {15+grey:'+tags.join(', ')+'}   ');
-				peerslisted++;
-				return linesremaining-peerslisted > 4;
-			});
-			linesremaining -= peerslisted;
-
-			if (wires.length > peerslisted) {
-				clivas.line('{80:}');
-				clivas.line('... and '+(wires.length-peerslisted)+' more     ');
-			}
-
-			clivas.line('{80:}');
-			clivas.flush();
+		function emitInfo() {			
+			info = {
+				unchoked: engine.swarm.wires.filter(active),
+				runtime: Math.floor((Date.now() - started) / 1000),				
+				fileName: destFile,
+				speed: swarm.downloadSpeed(),
+				wires: wires,
+				downloaded: swarm.downloaded,
+				uploaded: swarm.uploaded,				
+				hotswaps: hotswaps,
+				queued: swarm.queued
+			};
+			self.emit("info", info);
 		}
 
-		// setInterval(showInfo, 500);
-		// showInfo();
-	});
+		setInterval(emitInfo, 500);
+		emitInfo();	
+	}
 
 }
 
 function active(wire) {
 	return !wire.peerChoking;
-}
-
-function bytes(num) {
-	return numeral(num).format('0.0b');
-}
-
-function openPlayer(fileName, intervalId) {
-	minSize = 10 * 1024 * 1024; //10MB	
-	console.log(fileName);
-	fs.stat(fileName, function(err, stat) {
-		if (err) return;
-
-
-
-		if (stat.size >= minSize) {
-			clearInterval(intervalId);
-			proc.exec('vlc '+fileName);
-		}			
-	});
-	
 }
 
 module.exports = TorrentFlix;
